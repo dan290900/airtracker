@@ -410,7 +410,18 @@ export default function App() {
             flyToTarget={flyToTarget}
             onFlyTo={triggerFlyTo}
             onViewportChange={(vp) => {
+              const prev = viewportRef.current
               viewportRef.current = vp
+              const movedFar =
+                Math.abs(prev.lat - vp.lat) > 2.2 || Math.abs(prev.lon - vp.lon) > 2.8
+              if (
+                movedFar &&
+                (settings.provider === 'flyitalyadsb' ||
+                  settings.provider === 'adsblol-direct' ||
+                  settings.provider === 'adsbfi-relay')
+              ) {
+                void loadFlights(false)
+              }
             }}
           />
         )}

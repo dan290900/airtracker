@@ -2,9 +2,7 @@ import type { CoverageZone } from '../types/aviation'
 
 /**
  * Strategic European + Atlantic gateway coverage zones used by the automated
- * adsb.lol live feed snapshot and optional multi-hub sweeps.
- * Radius 250 NM (~463 km) matches the maximum radius of adsb.lol /v2/point and
- * stays within FlyItalyADSB's free 500 km limit.
+ * adsb.lol live feed snapshot (250 NM ~ 460 km radius).
  */
 export const LHG_COVERAGE_ZONES: CoverageZone[] = [
   {
@@ -63,6 +61,94 @@ export const LHG_COVERAGE_ZONES: CoverageZone[] = [
   },
 ]
 
+/**
+ * Extended multi-zone sweep for FlyItalyADSB Free API Key (500 km radius per request,
+ * 30 req/min limit). Covers Europe broadly plus major intercontinental Lufthansa Group hubs.
+ */
+export const FLYITALY_SWEEP_ZONES: CoverageZone[] = [
+  {
+    id: 'fi-fra',
+    name: 'Frankfurt, Benelux & Rhein-Ruhr',
+    shortLabel: 'FRA / BRU / DUS',
+    lat: 50.5,
+    lon: 7.8,
+    radiusKm: 500,
+    region: 'Mitteleuropa',
+  },
+  {
+    id: 'fi-muc-vie',
+    name: 'München, Zürich & Wien',
+    shortLabel: 'MUC / ZRH / VIE',
+    lat: 47.8,
+    lon: 12.8,
+    radiusKm: 500,
+    region: 'Alpenraum & Ost',
+  },
+  {
+    id: 'fi-ita',
+    name: 'Italien & Adria (ITA / Dolomiti)',
+    shortLabel: 'FCO / LIN / MXP',
+    lat: 42.6,
+    lon: 12.4,
+    radiusKm: 500,
+    region: 'Italien & Adria',
+  },
+  {
+    id: 'fi-uk-atl',
+    name: 'UK, Irland & Nordatlantik-Tor',
+    shortLabel: 'LHR / DUB / Atlantik',
+    lat: 53.0,
+    lon: -2.0,
+    radiusKm: 500,
+    region: 'Westeuropa & Nordsee',
+  },
+  {
+    id: 'fi-nordics',
+    name: 'Norddeutschland, Skandinavien & Polen',
+    shortLabel: 'HAM / BER / CPH / WAW',
+    lat: 55.5,
+    lon: 14.5,
+    radiusKm: 500,
+    region: 'Nord- & Osteuropa',
+  },
+  {
+    id: 'fi-iberia',
+    name: 'Spanien, Balearen & Südfrankreich',
+    shortLabel: 'PMI / BCN / MAD',
+    lat: 40.8,
+    lon: 0.5,
+    radiusKm: 500,
+    region: 'Frankreich & Iberien',
+  },
+  {
+    id: 'fi-balkan-greece',
+    name: 'Südosteuropa & Griechenland',
+    shortLabel: 'ATH / SOF / OTP',
+    lat: 41.2,
+    lon: 22.8,
+    radiusKm: 500,
+    region: 'Südosteuropa',
+  },
+  {
+    id: 'fi-us-east',
+    name: 'US-Ostküste (JFK / EWR / BOS / IAD)',
+    shortLabel: 'JFK / EWR / IAD',
+    lat: 40.7,
+    lon: -73.8,
+    radiusKm: 500,
+    region: 'Nordamerika',
+  },
+  {
+    id: 'fi-us-midwest',
+    name: 'Nordamerika Zentral (ORD / YYZ)',
+    shortLabel: 'ORD / YYZ / DTW',
+    lat: 42.3,
+    lon: -83.5,
+    radiusKm: 500,
+    region: 'Nordamerika',
+  },
+]
+
 export interface HubPreset {
   id: string
   label: string
@@ -80,6 +166,7 @@ export const MAP_HUB_PRESETS: HubPreset[] = [
   { id: 'vie', label: 'Wien', code: 'VIE', lat: 48.1103, lon: 16.5697, zoom: 8 },
   { id: 'bru', label: 'Brüssel', code: 'BRU', lat: 50.9014, lon: 4.4844, zoom: 8 },
   { id: 'fco', label: 'Rom FCO', code: 'FCO', lat: 41.8003, lon: 12.2389, zoom: 8 },
+  { id: 'jfk', label: 'New York', code: 'JFK', lat: 40.6413, lon: -73.7781, zoom: 6 },
 ]
 
 export function classifyRegion(lat: number, lon: number): string {
