@@ -73,7 +73,8 @@ function createAircraftIcon(
   const color = isSelected ? '#FFAD00' : airline.brandColor
   const heading = flight.trackDeg ?? 0
   const svg = getAircraftSilhouetteSvg(color, flight.aircraftTypeId, isSelected, isDark)
-  const size = isSelected ? 36 : 30
+  const size = isSelected ? 36 : 32
+  const opacity = isSelected ? 1 : flight.onGround ? 0.72 : 1
 
   const labelHtml =
     showLabel || isSelected
@@ -90,8 +91,8 @@ function createAircraftIcon(
     className: 'aircraft-marker-wrapper',
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
-    html: `<div style="position:relative;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;">
-      <div style="transform:rotate(${Math.round(heading)}deg);transform-origin:center;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 3px rgba(4,11,36,0.4));">
+    html: `<div style="position:relative;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;opacity:${opacity};">
+      <div style="width:${size}px;height:${size}px;transform:rotate(${Math.round(heading)}deg);transform-origin:50% 50%;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 3px rgba(4,11,36,0.4));">
         ${svg}
       </div>
       ${labelHtml}
@@ -176,6 +177,7 @@ export function RadarMap({
   const tileLayersRef = useRef<L.TileLayer[]>([])
   const markersRef = useRef<Map<string, L.Marker>>(new Map())
   const markerMetaRef = useRef<Map<string, string>>(new Map())
+  const flightsByHexRef = useRef<Map<string, LiveFlight>>(new Map())
   const coverageLayerRef = useRef<L.LayerGroup | null>(null)
   const trackLayerRef = useRef<L.LayerGroup | null>(null)
   const onSelectRef = useRef(onSelectFlight)
@@ -295,12 +297,14 @@ export function RadarMap({
     if (!map) return
 
     const activeHexes = new Set<string>()
+    flightsByHexRef.current.clear()
 
     for (const flight of flights) {
       activeHexes.add(flight.hex)
+      flightsByHexRef.current.set(flight.hex, flight)
       const isSelected = flight.hex === selectedHex
       const headingBucket = Math.round((flight.trackDeg ?? 0) / 3) * 3
-      const iconSignature = `${flight.airlineId}|${flight.aircraftTypeId ?? ''}|${headingBucket}|${isSelected ? 1 : 0}|${showLabels ? 1 : 0}|${isDarkMap ? 1 : 0}|${flight.callsign}`
+      const iconSignature = `${flight.airlineId}|${flight.aircraftTypeId ?? ''}|${headingBucket}|${isSelected ? 1 : 0}|${flight.onGround ? 1 : 0}|${showLabels ? 1 : 0}|${isDarkMap ? 1 : 0}|${flight.callsign}`
       const airline = AIRLINE_MAP[flight.airlineId]
       const tooltipContent = `${flight.callsign} · ${airline.shortName} · ${flight.icaoType ?? '—'} · ${formatAltitude(flight.altBaroFt, flight.onGround, unitSystem)}`
 
@@ -314,6 +318,7 @@ export function RadarMap({
         }
         existing.setTooltipContent(tooltipContent)
       } else {
+        const hexKey = flight.hex
         const marker = L.marker([flight.lat, flight.lon], {
           icon: createAircraftIcon(flight, isSelected, showLabels, isDarkMap),
           zIndexOffset: isSelected ? 1000 : flight.onGround ? -100 : 0,
@@ -325,7 +330,8 @@ export function RadarMap({
         })
         marker.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
-          onSelectRef.current(flight)
+          const latest = flightsByHexRef.current.get(hexKey)
+          if (latest) onSelectRef.current(latest)
         })
         marker.addTo(map)
         markersRef.current.set(flight.hex, marker)

@@ -104,8 +104,13 @@
 }
 
 .aircraft-marker-wrapper {
-  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
+  background: transparent;
+  border: none;
+}
+
+.aircraft-marker-wrapper svg {
+  max-width: none;
+  display: block;
 }
 
 .aircraft-tooltip {

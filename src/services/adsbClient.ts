@@ -677,11 +677,16 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
     options.existingFlights
   )
 
-  // Fuse with worldwide adsb.lol backfill: FlyItalyADSB direct real-time always wins per ICAO hex!
+  // Fuse with worldwide adsb.lol backfill: never overwrite a fresher real-time position with an older snapshot!
   const backfillFlights = await backfillPromise
   const mergedByHex = new Map<string, LiveFlight>()
   for (const bf of backfillFlights) {
-    mergedByHex.set(bf.hex, bf)
+    const prev = options.existingFlights?.get(bf.hex)
+    if (prev && prev.lastSeenMs > bf.lastSeenMs && Date.now() - prev.lastSeenMs < 180_000) {
+      mergedByHex.set(bf.hex, prev)
+    } else {
+      mergedByHex.set(bf.hex, bf)
+    }
   }
   for (const df of directFlights) {
     mergedByHex.set(df.hex, df)

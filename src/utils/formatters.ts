@@ -139,6 +139,7 @@ export function buildGreatCircleArc(
   if (d < 1e-6) return [start, end]
 
   const points: [number, number][] = []
+  let prevLon: number | null = null
   for (let i = 0; i <= steps; i++) {
     const f = i / steps
     const A = Math.sin((1 - f) * d) / Math.sin(d)
@@ -147,7 +148,12 @@ export function buildGreatCircleArc(
     const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2)
     const z = A * Math.sin(lat1) + B * Math.sin(lat2)
     const lat = toDeg(Math.atan2(z, Math.sqrt(x * x + y * y)))
-    const lon = toDeg(Math.atan2(y, x))
+    let lon = toDeg(Math.atan2(y, x))
+    if (prevLon !== null) {
+      while (lon - prevLon > 180) lon -= 360
+      while (lon - prevLon < -180) lon += 360
+    }
+    prevLon = lon
     points.push([lat, lon])
   }
   return points
