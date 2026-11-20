@@ -53,7 +53,12 @@ export function SettingsView({
 
   const handleSaveRelay = (e: React.FormEvent) => {
     e.preventDefault()
-    onUpdateSettings({ customRelayUrl: relayDraft.trim() })
+    const cleanUrl = relayDraft.trim()
+    const patch: Partial<ApiSettings> = { customRelayUrl: cleanUrl }
+    if (cleanUrl && settings.provider !== 'adsbfi-relay') {
+      patch.provider = 'adsblol-direct'
+    }
+    onUpdateSettings(patch)
     setRelaySaved(true)
     setTimeout(() => setRelaySaved(false), 2000)
   }
@@ -323,7 +328,7 @@ export function SettingsView({
               type="url"
               value={relayDraft}
               onChange={(e) => setRelayDraft(e.target.value)}
-              placeholder="https://mein-adsb-relay.example.com"
+              placeholder="https://lhg-adsb-relay.deinname.workers.dev"
               className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-mono text-xs text-slate-900 focus:border-[#05164D] focus:bg-white focus:outline-none dark:border-white/15 dark:bg-[#040B24] dark:text-white"
             />
             <button
@@ -339,6 +344,17 @@ export function SettingsView({
               )}
             </button>
           </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            Für echtes 20-Sekunden-Weltweit-Tracking mit <code className="font-mono">adsb.lol</code> liegt der fertige, kostenlose Cloudflare Worker direkt im Repo:{' '}
+            <a
+              href="https://github.com/dan290900/airtracker/tree/main/cloudflare-worker"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-0.5 font-semibold text-[#05164D] underline decoration-[#FFAD00] underline-offset-2 dark:text-[#FFAD00]"
+            >
+              cloudflare-worker Anleitung &amp; Code <ExternalLink className="h-3 w-3" />
+            </a>
+          </p>
         </form>
 
         <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/75 p-3 text-[11px] leading-relaxed text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200">

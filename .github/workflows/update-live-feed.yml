@@ -2,8 +2,8 @@ name: Update Live ADS-B Feed (adsb.lol)
 
 on:
   schedule:
-    # Runs every 10 minutes (6 zones × 144 runs/day = stays within adsb.lol free keyless limits per runner IP)
-    - cron: '*/10 * * * *'
+    # Runs every 5 minutes (maximum frequency allowed on GitHub Actions)
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:

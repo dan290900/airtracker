@@ -727,6 +727,57 @@ async function fetchRelayLive(
   const nowMs = Date.now()
   const relayBase = options.settings.customRelayUrl.trim().replace(/\/+$/, '')
 
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (kind === 'adsblol-direct' && options.settings.adsbLolApiKey.trim()) {
+    headers['x-api-key'] = options.settings.adsbLolApiKey.trim()
+  }
+
+  // Fast-path: our Cloudflare Worker provides GET /lhg-live (all 33 LHG types worldwide in 1 request, 20s Edge Cache!)
+  if (kind === 'adsblol-direct' && relayBase) {
+    try {
+      const { data, headers: resHeaders } = await fetchJsonWithHandling(
+        `${relayBase}/lhg-live`,
+        { headers, signal: options.signal },
+        'adsb.lol Cloudflare Relay'
+      )
+      const payload = data as Partial<SnapshotFilePayload>
+      if (Array.isArray(payload.aircraft)) {
+        const genMs = payload.generatedAtMs || nowMs
+        const flights = normalizeLhgFlights(
+          payload.aircraft,
+          'adsblol-direct',
+          genMs,
+          options.existingFlights,
+          240
+        )
+        const quota = parseAdsbLolQuota(resHeaders)
+        const cacheStatus = resHeaders.get('x-lhg-cache')
+        return {
+          flights,
+          meta: {
+            provider: 'adsblol-direct',
+            providerLabel: `adsb.lol Live-Relay (Weltweit${cacheStatus === 'HIT' ? ' · Edge-Cache' : ''})`,
+            fetchedAtMs: nowMs,
+            snapshotGeneratedAtMs: genMs,
+            coverageZones: LHG_COVERAGE_ZONES,
+            coverageDescription:
+              'Echtzeit-Abruf aller 33 Lufthansa-Group-Flugzeugtypen weltweit in 1 Request über deinen Cloudflare Worker (api.adsb.lol, ODbL 1.0)',
+            totalRawScanned: payload.totalRawScanned ?? payload.aircraft.length,
+            matchedCount: flights.length,
+            isLiveDirect: true,
+            quota,
+          },
+        }
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      // If a generic /v2 proxy returned 404 for /lhg-live, fall back cleanly to /v2/point below
+      if (!(err instanceof AdsbApiError && err.status === 404)) {
+        throw err
+      }
+    }
+  }
+
   let baseUrl: string
   if (relayBase) {
     baseUrl = relayBase
@@ -745,11 +796,6 @@ async function fetchRelayLive(
     kind === 'adsblol-direct'
       ? `/v2/point/${lat}/${lon}/${distNm}`
       : `/v2/lat/${lat}/lon/${lon}/dist/${distNm}`
-
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  if (kind === 'adsblol-direct' && options.settings.adsbLolApiKey.trim()) {
-    headers['x-api-key'] = options.settings.adsbLolApiKey.trim()
-  }
 
   const label = kind === 'adsblol-direct' ? 'adsb.lol' : 'adsb.fi'
   const { data, headers: resHeaders } = await fetchJsonWithHandling(
