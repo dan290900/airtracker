@@ -27,6 +27,15 @@ interface RadarMapProps {
   onViewportChange?: (viewport: { lat: number; lon: number; radiusKm: number }) => void
 }
 
+const DARK_MAP_COLOR_OVERRIDES: Partial<Record<string, string>> = {
+  DLH: '#4F8EFF',
+  BEL: '#5EA8FF',
+  ITY: '#5B9BFF',
+  LHX: '#60A5FA',
+  CLH: '#7AA7FF',
+  EWG: '#E83E8C',
+}
+
 function getAircraftSilhouetteSvg(
   color: string,
   aircraftTypeId: string | null,
@@ -36,8 +45,8 @@ function getAircraftSilhouetteSvg(
   const spec = aircraftTypeId ? FLEET_MAP[aircraftTypeId] : null
   const isQuad = spec?.engineCount === 4
   const isWide = spec?.category === 'widebody' || spec?.id === 'B77L'
-  const strokeColor = isSelected ? '#05164D' : isDark ? '#040B24' : '#FFFFFF'
-  const strokeWidth = isSelected ? 1.6 : 1.25
+  const strokeColor = isSelected ? '#05164D' : isDark ? 'rgba(255,255,255,0.88)' : '#FFFFFF'
+  const strokeWidth = isSelected ? 1.6 : isDark ? 1.15 : 1.25
 
   if (isQuad) {
     return `<svg viewBox="0 0 36 36" width="32" height="32" xmlns="http://www.w3.org/2000/svg">
@@ -70,7 +79,11 @@ function createAircraftIcon(
   isDark: boolean
 ): L.DivIcon {
   const airline = AIRLINE_MAP[flight.airlineId]
-  const color = isSelected ? '#FFAD00' : airline.brandColor
+  const color = isSelected
+    ? '#FFAD00'
+    : isDark
+      ? (DARK_MAP_COLOR_OVERRIDES[flight.airlineId] ?? airline.brandColor)
+      : airline.brandColor
   const heading = flight.trackDeg ?? 0
   const svg = getAircraftSilhouetteSvg(color, flight.aircraftTypeId, isSelected, isDark)
   const size = isSelected ? 36 : 32
@@ -92,7 +105,7 @@ function createAircraftIcon(
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     html: `<div style="position:relative;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;opacity:${opacity};">
-      <div style="width:${size}px;height:${size}px;transform:rotate(${Math.round(heading)}deg);transform-origin:50% 50%;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 3px rgba(4,11,36,0.4));">
+      <div style="width:${size}px;height:${size}px;transform:rotate(${Math.round(heading)}deg);transform-origin:50% 50%;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 3px rgba(4,11,36,0.45));">
         ${svg}
       </div>
       ${labelHtml}
@@ -394,14 +407,26 @@ export function RadarMap({
       enrichedInfo.origin &&
       enrichedInfo.destination
     ) {
-      const arc = buildGreatCircleArc(
+      const flownArc = buildGreatCircleArc(
         [enrichedInfo.origin.lat, enrichedInfo.origin.lon],
-        [enrichedInfo.destination.lat, enrichedInfo.destination.lon]
+        [selectedFlight.lat, selectedFlight.lon],
+        24
       )
-      L.polyline(arc, {
+      const remainingArc = buildGreatCircleArc(
+        [selectedFlight.lat, selectedFlight.lon],
+        [enrichedInfo.destination.lat, enrichedInfo.destination.lon],
+        24
+      )
+      L.polyline(flownArc, {
+        color: isDarkMap ? '#FFAD00' : '#05164D',
+        weight: 2.5,
+        opacity: 0.85,
+      }).addTo(group)
+
+      L.polyline(remainingArc, {
         color: isDarkMap ? '#FFAD00' : '#05164D',
         weight: 2.2,
-        opacity: 0.78,
+        opacity: 0.72,
         dashArray: '6 6',
       }).addTo(group)
 
@@ -412,17 +437,19 @@ export function RadarMap({
           iconAnchor: [22, 11],
           html: `<div style="display:inline-flex;align-items:center;justify-content:center;padding:2px 6px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;background:${
             isDest ? '#FFAD00' : '#05164D'
-          };color:${isDest ? '#05164D' : '#FFFFFF'};border:1.5px solid #FFFFFF;box-shadow:0 3px 10px rgba(0,0,0,0.28);">${code}</div>`,
+          };color:${isDest ? '#05164D' : '#FFFFFF'};border:1.5px solid #FFFFFF;box-shadow:0 3px 10px rgba(0,0,0,0.35);">${code}</div>`,
         })
 
       L.marker([enrichedInfo.origin.lat, enrichedInfo.origin.lon], {
         icon: pinStyle(enrichedInfo.origin.iata, false),
         interactive: false,
+        zIndexOffset: 1500,
       }).addTo(group)
 
       L.marker([enrichedInfo.destination.lat, enrichedInfo.destination.lon], {
         icon: pinStyle(enrichedInfo.destination.iata, true),
         interactive: false,
+        zIndexOffset: 1500,
       }).addTo(group)
     }
 

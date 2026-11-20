@@ -237,7 +237,8 @@ export function FlightDetailPanel({
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {enrichedInfo?.status === 'loading'
                 ? 'Abflug- und Zielflughafen werden über adsbdb.com abgefragt…'
-                : 'Abflug- und Zielflughafen sind für dieses Callsign im offenen ADS-B-Datenbestand aktuell nicht hinterlegt.'}
+                : enrichedInfo?.routeRejectedNotice ??
+                  'Abflug- und Zielflughafen sind für dieses Callsign im offenen ADS-B-Datenbestand aktuell nicht hinterlegt.'}
             </p>
           )}
         </div>

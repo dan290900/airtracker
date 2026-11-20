@@ -140,6 +140,7 @@ export interface EnrichedFlightInfo {
   origin: AirportInfo | null
   destination: AirportInfo | null
   routeSource: 'adsbdb' | 'none'
+  routeRejectedNotice?: string
   photoUrl: string | null
   photoAuthor: string | null
   photoLink: string | null
