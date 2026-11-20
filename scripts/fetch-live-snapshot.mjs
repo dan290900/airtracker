@@ -19,11 +19,12 @@ const COVERAGE_ZONES = [
   { id: 'iberia-med', name: 'Westliches Mittelmeer & Balearen', shortLabel: 'PMI / BCN / NCE', lat: 41.3, lon: 2.8, radiusKm: 460, region: 'Mittelmeerraum' },
 ]
 
-/** All 25 ICAO aircraft types operated across the Lufthansa Group, batched into 3 comma-separated worldwide /v2/type requests */
+/** All 33 ICAO aircraft types operated across the Lufthansa Group (incl. Helvetic/Braathens/Eurowings wet-leases), batched into 4 comma-separated worldwide /v2/type requests */
 const LHG_WORLDWIDE_TYPE_BATCHES = [
   ['A359', 'A35K', 'A388', 'B748', 'B744', 'B789', 'B77W', 'B772', 'B77L', 'B763'],
   ['A333', 'A339', 'A332', 'A343', 'A346', 'BCS1', 'BCS3', 'E190', 'E195', 'CRJ9'],
   ['A319', 'A320', 'A20N', 'A321', 'A21N'],
+  ['E290', 'E295', 'AT76', 'B738', 'B38M', 'E170', 'E175', 'CRJ7'],
 ]
 
 const LHG_CALLSIGN_PREFIXES = new Set([

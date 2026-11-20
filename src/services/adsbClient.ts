@@ -479,14 +479,52 @@ function approxDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+let cachedGlobalBackfill: { flights: LiveFlight[]; fetchedAtMs: number } | null = null
+
+async function getWorldwideBackfillFlights(
+  existingFlights?: Map<string, LiveFlight>,
+  signal?: AbortSignal
+): Promise<LiveFlight[]> {
+  const nowMs = Date.now()
+  if (cachedGlobalBackfill && nowMs - cachedGlobalBackfill.fetchedAtMs < 90_000) {
+    return cachedGlobalBackfill.flights
+  }
+  try {
+    const cacheBust = Math.floor(nowMs / 60_000)
+    const res = await fetch(`${LIVE_FEED_RAW_URL}?t=${cacheBust}`, {
+      cache: 'no-store',
+      signal,
+    })
+    if (!res.ok) return cachedGlobalBackfill?.flights ?? []
+    const snapshot = (await res.json()) as SnapshotFilePayload
+    if (!snapshot || !Array.isArray(snapshot.aircraft)) {
+      return cachedGlobalBackfill?.flights ?? []
+    }
+    const genMs = snapshot.generatedAtMs || Date.parse(snapshot.generatedAt) || nowMs
+    const flights = normalizeLhgFlights(
+      snapshot.aircraft,
+      'adsblol-feed',
+      genMs,
+      existingFlights,
+      600
+    )
+    cachedGlobalBackfill = { flights, fetchedAtMs: nowMs }
+    return flights
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    return cachedGlobalBackfill?.flights ?? []
+  }
+}
+
 /**
  * Mode 2: FlyItalyADSB direct browser live polling (CORS open: Access-Control-Allow-Origin: *).
  * Uses user's free self-serve API key from localStorage (never hardcoded).
  *
- * Hybrid Worldwide Live Sweep (strictly stays within 30 req/min Free plan cap):
- * 1) 6 European 500-km zones (?fields=light — catches 100% of European short/medium-haul traffic)
- * 2) 15 global /v2/type/{code}?fields=light widebody & freighter queries (catches ALL intercontinental LHG flights worldwide!)
+ * Hybrid Worldwide Live Fusion (strictly stays within 30 req/min Free plan cap):
+ * 1) 6 European 500-km zones (?fields=light — catches European short/medium-haul traffic in real time)
+ * 2) 15 global /v2/type/{code}?fields=light widebody & freighter queries (intercontinental real-time)
  * 3) Dynamic 500-km viewport scan when panned outside Europe
+ * 4) Automatic worldwide fusion with adsb.lol live-data feed for any LHG aircraft not covered by FlyItalyADSB receivers (e.g. narrowbodies over Greece/Canaries or Asia/South America)
  */
 async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFlightsResult> {
   const apiKey = options.settings.flyItalyApiKey.trim()
@@ -500,6 +538,9 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
   const nowMs = Date.now()
   const vpLat = Number(options.viewportCenter.lat.toFixed(2))
   const vpLon = Number(options.viewportCenter.lon.toFixed(2))
+
+  // Start worldwide adsb.lol backfill in parallel (cached 90s, zero FlyItaly quota cost)
+  const backfillPromise = getWorldwideBackfillFlights(options.existingFlights, options.signal)
 
   // Use the 6 core European zones + optional custom viewport when panned outside Europe
   const euZones = FLYITALY_SWEEP_ZONES.slice(0, 6)
@@ -629,23 +670,43 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
     throw firstError
   }
 
-  const flights = normalizeLhgFlights(allRaw, 'flyitalyadsb', Date.now(), options.existingFlights)
+  const directFlights = normalizeLhgFlights(
+    allRaw,
+    'flyitalyadsb',
+    Date.now(),
+    options.existingFlights
+  )
+
+  // Fuse with worldwide adsb.lol backfill: FlyItalyADSB direct real-time always wins per ICAO hex!
+  const backfillFlights = await backfillPromise
+  const mergedByHex = new Map<string, LiveFlight>()
+  for (const bf of backfillFlights) {
+    mergedByHex.set(bf.hex, bf)
+  }
+  for (const df of directFlights) {
+    mergedByHex.set(df.hex, df)
+  }
+  const flights = Array.from(mergedByHex.values())
+  const addedFromBackfill = Math.max(0, flights.length - directFlights.length)
 
   return {
     flights,
     meta: {
       provider: 'flyitalyadsb',
-      providerLabel: 'FlyItalyADSB Direct Live (Weltweit)',
+      providerLabel: 'FlyItalyADSB Live + adsb.lol Weltweit',
       fetchedAtMs: Date.now(),
       snapshotGeneratedAtMs: Date.now(),
       coverageZones: activeZones,
-      coverageDescription: `${activeZones.length} Europa/Viewport-Zonen (500 km) + ${activeTypeCount} Langstrecken-Typen weltweit live (CC BY-SA 4.0)`,
+      coverageDescription:
+        addedFromBackfill > 0
+          ? `${directFlights.length} direkt live via FlyItalyADSB (${activeZones.length} Zonen + ${activeTypeCount} Typen) + ${addedFromBackfill} weltweite Ergänzungen via adsb.lol`
+          : `${activeZones.length} Europa/Viewport-Zonen (500 km) + ${activeTypeCount} Langstrecken-Typen weltweit live (CC BY-SA 4.0)`,
       totalRawScanned: allRaw.length,
       matchedCount: flights.length,
       isLiveDirect: true,
       quota,
       warning: hitRateLimit
-        ? 'FlyItalyADSB 30 Req/Min-Limit kurzzeitig erreicht – restliche Langstrecken-Typen werden im nächsten Intervall automatisch nachgeladen.'
+        ? 'FlyItalyADSB 30 Req/Min-Limit kurzzeitig erreicht – fehlende weltweite Flüge werden nahtlos über adsb.lol ergänzt.'
         : undefined,
     },
   }
