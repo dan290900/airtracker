@@ -1,0 +1,47 @@
+name: Update Live ADS-B Feed (adsb.lol)
+
+on:
+  schedule:
+    # Runs every 10 minutes (6 zones × 144 runs/day = stays within adsb.lol free keyless limits per runner IP)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: 'live-data-feed'
+  cancel-in-progress: true
+
+jobs:
+  update-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main for fetcher script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/fetch-live-snapshot.mjs
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Fetch live Lufthansa Group ADS-B snapshot from api.adsb.lol
+        env:
+          ADSBLOL_API_KEY: ${{ secrets.ADSBLOL_API_KEY }}
+        run: node scripts/fetch-live-snapshot.mjs /tmp/lhg-flights.json
+
+      - name: Publish snapshot to orphan live-data branch
+        run: |
+          mkdir -p /tmp/live-branch
+          cp /tmp/lhg-flights.json /tmp/live-branch/lhg-flights.json
+          cd /tmp/live-branch
+          git init -b live-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lhg-flights.json
+          git commit -m "chore(live-data): update adsb.lol snapshot"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push --force origin live-data
