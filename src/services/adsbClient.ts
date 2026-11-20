@@ -82,7 +82,7 @@ export interface FetchFlightsResult {
 }
 
 const LIVE_FEED_RAW_URL =
-  'https://raw.githubusercontent.com/dan290900/airtracker/live-data/lhg-flights.json'
+  'https://raw.githubusercontent.com/dan290900/airtracker/refs/heads/live-data/lhg-flights.json'
 
 /** Normalize and filter raw readsb/adsb.lol/FlyItalyADSB aircraft array into Lufthansa Group flights */
 export function normalizeLhgFlights(
