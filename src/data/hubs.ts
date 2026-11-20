@@ -159,6 +159,7 @@ export interface HubPreset {
 }
 
 export const MAP_HUB_PRESETS: HubPreset[] = [
+  { id: 'world', label: 'Weltweit', code: 'WELT', lat: 28.0, lon: 5.0, zoom: 2 },
   { id: 'europe', label: 'Europa', code: 'EUR', lat: 48.6, lon: 10.2, zoom: 5 },
   { id: 'fra', label: 'Frankfurt', code: 'FRA', lat: 50.0379, lon: 8.5622, zoom: 8 },
   { id: 'muc', label: 'München', code: 'MUC', lat: 48.3538, lon: 11.7861, zoom: 8 },

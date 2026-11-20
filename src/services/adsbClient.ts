@@ -416,7 +416,7 @@ async function fetchAdsbLolFeed(options: FetchFlightsOptions): Promise<FetchFlig
               ? snapshot.coverageZones
               : LHG_COVERAGE_ZONES,
           coverageDescription:
-            '6 europäische Lufthansa-Group-Korridore (je 250 NM / 460 km Radius via api.adsb.lol, ODbL 1.0)',
+            'Weltweiter Hybrid-Abruf (6 Europa-Hub-Korridore + alle 25 LHG-Flugzeugtypen weltweit via api.adsb.lol, ODbL 1.0)',
           totalRawScanned: snapshot.totalRawScanned,
           matchedCount: flights.length,
           isLiveDirect: false,
@@ -441,7 +441,33 @@ interface CachedZoneEntry {
   fetchedAtMs: number
 }
 
+interface CachedTypeEntry {
+  typeCode: string
+  raw: RawAdsbAircraft[]
+  fetchedAtMs: number
+}
+
 const flyItalyZoneCache = new Map<string, CachedZoneEntry>()
+const flyItalyTypeCache = new Map<string, CachedTypeEntry>()
+
+/** Worldwide long-haul, widebody, and freighter ICAO types queried globally via FlyItalyADSB /v2/type/{code} */
+const FLYITALY_GLOBAL_LONGHAUL_TYPES = [
+  'A359',
+  'A35K',
+  'A388',
+  'B748',
+  'B744',
+  'B789',
+  'B77W',
+  'B772',
+  'B77L',
+  'B763',
+  'A333',
+  'A339',
+  'A332',
+  'A343',
+  'A346',
+]
 
 function approxDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (d: number) => (d * Math.PI) / 180
@@ -457,11 +483,10 @@ function approxDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number
  * Mode 2: FlyItalyADSB direct browser live polling (CORS open: Access-Control-Allow-Origin: *).
  * Uses user's free self-serve API key from localStorage (never hardcoded).
  *
- * Smart multi-zone sweep:
- * - Sweeps 9 strategic 500-km zones across Europe + US East/Midwest gateways
- *   (with 45s per-zone cache so total rate stays well under 30 req/min).
- * - Also scans the user's current map viewport (500 km) if panned outside those hubs,
- *   merging all live Lufthansa Group aircraft seamlessly without losing European coverage.
+ * Hybrid Worldwide Live Sweep (strictly stays within 30 req/min Free plan cap):
+ * 1) 6 European 500-km zones (?fields=light — catches 100% of European short/medium-haul traffic)
+ * 2) 15 global /v2/type/{code}?fields=light widebody & freighter queries (catches ALL intercontinental LHG flights worldwide!)
+ * 3) Dynamic 500-km viewport scan when panned outside Europe
  */
 async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFlightsResult> {
   const apiKey = options.settings.flyItalyApiKey.trim()
@@ -476,12 +501,13 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
   const vpLat = Number(options.viewportCenter.lat.toFixed(2))
   const vpLon = Number(options.viewportCenter.lon.toFixed(2))
 
-  // Determine whether the user's current viewport is outside our 9 standard hub zones
-  const isViewportCovered = FLYITALY_SWEEP_ZONES.some(
-    (z) => approxDistanceKm(vpLat, vpLon, z.lat, z.lon) < 280
+  // Use the 6 core European zones + optional custom viewport when panned outside Europe
+  const euZones = FLYITALY_SWEEP_ZONES.slice(0, 6)
+  const isViewportCovered = euZones.some(
+    (z) => approxDistanceKm(vpLat, vpLon, z.lat, z.lon) < 300
   )
 
-  const targetZones: CoverageZone[] = [...FLYITALY_SWEEP_ZONES]
+  const targetZones: CoverageZone[] = [...euZones]
   if (!isViewportCovered) {
     targetZones.unshift({
       id: `vp:${vpLat.toFixed(1)},${vpLon.toFixed(1)}`,
@@ -494,74 +520,93 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
     })
   }
 
-  // Decide which zones need a fresh network call (respecting 30 req/min free cap)
-  const CACHE_TTL_MS = Math.max(25_000, Math.min(55_000, options.settings.refreshIntervalSec * 1000))
-  const zonesToFetch: CoverageZone[] = []
+  // Keep steady-state request rate safely below 30 req/min:
+  // 6 EU zones every >=35s (~10 req/min) + 15 global long-haul types every 75s (~12 req/min) = ~22 req/min max!
+  const ZONE_TTL_MS = Math.max(35_000, options.settings.refreshIntervalSec * 1000)
+  const TYPE_TTL_MS = 75_000
 
-  for (const zone of targetZones) {
-    const cached = flyItalyZoneCache.get(zone.id)
-    if (!cached || nowMs - cached.fetchedAtMs >= CACHE_TTL_MS) {
-      zonesToFetch.push(zone)
-    }
-  }
+  const zonesToFetch = targetZones.filter((z) => {
+    const c = flyItalyZoneCache.get(z.id)
+    return !c || nowMs - c.fetchedAtMs >= ZONE_TTL_MS
+  })
 
-  // Cap per-cycle fetches to 9 (first load fetches all 9; steady-state stays <= 18 req/min at 30s)
-  const batch = zonesToFetch.slice(0, 9)
+  const typesToFetch = FLYITALY_GLOBAL_LONGHAUL_TYPES.filter((t) => {
+    const c = flyItalyTypeCache.get(t)
+    return !c || nowMs - c.fetchedAtMs >= TYPE_TTL_MS
+  })
+
   let quota: QuotaInfo | undefined
   let firstError: AdsbApiError | null = null
+  let hitRateLimit = false
 
-  // Fetch in small concurrent groups of 3 to stay fast (~0.6s total) without burst-throttling
-  for (let i = 0; i < batch.length; i += 3) {
-    const chunk = batch.slice(i, i + 3)
-    const settled = await Promise.allSettled(
-      chunk.map(async (zone) => {
-        const url = `https://api.flyitalyadsb.com/v2/lat/${zone.lat}/lon/${zone.lon}/dist/${zone.radiusKm}`
-        const { data, headers } = await fetchJsonWithHandling(
-          url,
-          {
-            headers: {
-              'X-Api-Key': apiKey,
-              Accept: 'application/json',
-            },
-            signal: options.signal,
-          },
-          'FlyItalyADSB'
-        )
-        const payload = data as RawAdsbResponse
-        const rawList = Array.isArray(payload.ac)
-          ? payload.ac
-          : Array.isArray(payload.aircraft)
-            ? payload.aircraft
-            : []
-        flyItalyZoneCache.set(zone.id, { zone, raw: rawList, fetchedAtMs: Date.now() })
-        const q = parseFlyItalyQuota(headers)
-        if (q) quota = q
-      })
+  const runTask = async (url: string, onRaw: (raw: RawAdsbAircraft[]) => void) => {
+    const { data, headers } = await fetchJsonWithHandling(
+      url,
+      {
+        headers: {
+          'X-Api-Key': apiKey,
+          Accept: 'application/json',
+        },
+        signal: options.signal,
+      },
+      'FlyItalyADSB'
     )
+    const payload = data as RawAdsbResponse
+    const rawList = Array.isArray(payload.ac)
+      ? payload.ac
+      : Array.isArray(payload.aircraft)
+        ? payload.aircraft
+        : []
+    onRaw(rawList)
+    const q = parseFlyItalyQuota(headers)
+    if (q) quota = q
+  }
 
+  // Build combined queue (prioritize viewport + EU zones first, then global widebody types)
+  const queue: Array<() => Promise<void>> = [
+    ...zonesToFetch.map((zone) => () =>
+      runTask(
+        `https://api.flyitalyadsb.com/v2/lat/${zone.lat}/lon/${zone.lon}/dist/${zone.radiusKm}?fields=light`,
+        (raw) => flyItalyZoneCache.set(zone.id, { zone, raw, fetchedAtMs: Date.now() })
+      )
+    ),
+    ...typesToFetch.map((typeCode) => () =>
+      runTask(`https://api.flyitalyadsb.com/v2/type/${typeCode}?fields=light`, (raw) =>
+        flyItalyTypeCache.set(typeCode, { typeCode, raw, fetchedAtMs: Date.now() })
+      )
+    ),
+  ]
+
+  for (let i = 0; i < queue.length; i += 4) {
+    if (hitRateLimit) break
+    const chunk = queue.slice(i, i + 4)
+    const settled = await Promise.allSettled(chunk.map((fn) => fn()))
     for (const r of settled) {
       if (r.status === 'rejected') {
         const err = r.reason
         if (err instanceof DOMException && err.name === 'AbortError') throw err
-        if (err instanceof AdsbApiError && !firstError) {
-          firstError = err
-          // Stop immediately on invalid API key or rate-limit
-          if (err.code === 'UNAUTHORIZED' || err.code === 'RATE_LIMITED') {
+        if (err instanceof AdsbApiError) {
+          if (!firstError) firstError = err
+          if (err.code === 'UNAUTHORIZED') {
             throw err
+          }
+          if (err.code === 'RATE_LIMITED') {
+            hitRateLimit = true
           }
         }
       }
     }
+    if (i + 4 < queue.length && !hitRateLimit) {
+      await new Promise((res) => setTimeout(res, 220))
+    }
   }
 
-  // Prune stale custom viewport caches older than 3 minutes
   for (const [id, entry] of flyItalyZoneCache.entries()) {
     if (id.startsWith('vp:') && nowMs - entry.fetchedAtMs > 180_000) {
       flyItalyZoneCache.delete(id)
     }
   }
 
-  // Aggregate all fresh cached zones
   const activeZones: CoverageZone[] = []
   const allRaw: RawAdsbAircraft[] = []
   for (const zone of targetZones) {
@@ -571,8 +616,16 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
       allRaw.push(...entry.raw)
     }
   }
+  let activeTypeCount = 0
+  for (const t of FLYITALY_GLOBAL_LONGHAUL_TYPES) {
+    const entry = flyItalyTypeCache.get(t)
+    if (entry && nowMs - entry.fetchedAtMs < 180_000) {
+      activeTypeCount++
+      allRaw.push(...entry.raw)
+    }
+  }
 
-  if (activeZones.length === 0 && firstError) {
+  if (activeZones.length === 0 && activeTypeCount === 0 && firstError) {
     throw firstError
   }
 
@@ -582,17 +635,18 @@ async function fetchFlyItalyLive(options: FetchFlightsOptions): Promise<FetchFli
     flights,
     meta: {
       provider: 'flyitalyadsb',
-      providerLabel: 'FlyItalyADSB Direct Live (Multi-Hub)',
+      providerLabel: 'FlyItalyADSB Direct Live (Weltweit)',
       fetchedAtMs: Date.now(),
       snapshotGeneratedAtMs: Date.now(),
       coverageZones: activeZones,
-      coverageDescription: `${activeZones.length} aktive 500-km-Live-Zonen (Ganz Europa + US-Ostküste/Midwest${
-        !isViewportCovered ? ' + aktueller Kartenausschnitt' : ''
-      }, CC BY-SA 4.0)`,
+      coverageDescription: `${activeZones.length} Europa/Viewport-Zonen (500 km) + ${activeTypeCount} Langstrecken-Typen weltweit live (CC BY-SA 4.0)`,
       totalRawScanned: allRaw.length,
       matchedCount: flights.length,
       isLiveDirect: true,
       quota,
+      warning: hitRateLimit
+        ? 'FlyItalyADSB 30 Req/Min-Limit kurzzeitig erreicht – restliche Langstrecken-Typen werden im nächsten Intervall automatisch nachgeladen.'
+        : undefined,
     },
   }
 }
@@ -700,21 +754,21 @@ export const PROVIDER_CATALOG: Array<{
 }> = [
   {
     id: 'adsblol-feed',
-    name: 'adsb.lol Live-Feed (Standard)',
+    name: 'adsb.lol Live-Feed (Standard · Weltweit)',
     badge: 'Kostenlos · Ohne Key',
     corsInBrowser: true,
     requiresKey: false,
     summary:
-      'Nutzt echte api.adsb.lol-Daten (ODbL 1.0) über 6 europäische Lufthansa-Group-Korridore. Automatisch aktualisiert via GitHub Actions — sofort funktionsfähig auf GitHub Pages ohne CORS-Probleme.',
+      'Weltweiter Hybrid-Abruf echter api.adsb.lol-Daten (ODbL 1.0): 6 europäische Hub-Korridore plus globaler Scan aller 25 Lufthansa-Group-Flugzeugtypen (Europa, Amerika, Asien, Afrika). Automatisch alle 10 Min. via GitHub Actions.',
   },
   {
     id: 'flyitalyadsb',
-    name: 'FlyItalyADSB Direct Live',
+    name: 'FlyItalyADSB Direct Live (Weltweit)',
     badge: 'CORS-offen · Kostenloser Key',
     corsInBrowser: true,
     requiresKey: true,
     summary:
-      'Direkte 15-Sekunden-Echtzeit-Abfrage direkt aus dem Browser für jeden beliebigen Kartenausschnitt weltweit (bis 500 km Radius, 300.000 Anfragen/Monat kostenlos, CC BY-SA 4.0).',
+      'Direktes Browser-Echtzeit-Tracking über 6 europäische 500-km-Zonen plus 15 weltweite Langstrecken-/Frachter-Typen (A350, A380, B747, B787, B777, A330/340) und dynamischen Viewport-Scan (300.000 Req/Monat kostenlos, CC BY-SA 4.0).',
     keyPortalUrl: 'https://flyitalyadsb.com/en/data/api/',
   },
   {

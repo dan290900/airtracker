@@ -94,6 +94,11 @@ export function RadarView({
   onViewportChange,
 }: RadarViewProps) {
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
+  const [dismissedBannerMsg, setDismissedBannerMsg] = useState<string | null>(null)
+  const showBanner = Boolean(errorMessage && errorMessage !== dismissedBannerMsg)
+  const isSoftWarning = Boolean(
+    errorMessage && feedMeta?.warning && errorMessage === feedMeta.warning
+  )
 
   const selectedFlight = useMemo(
     () => (selectedHex ? flights.find((f) => f.hex === selectedHex) ?? null : null),
@@ -123,6 +128,7 @@ export function RadarView({
         showCoverageOverlay={settings.showCoverageOverlay}
         showLabels={settings.showLabels}
         followSelected={followSelected}
+        mapStyle={settings.mapStyle}
         theme={settings.theme}
         unitSystem={settings.unitSystem}
         flyToTarget={flyToTarget}
@@ -161,7 +167,7 @@ export function RadarView({
             )}
           </div>
 
-          {/* Refresh / Pause / Overlay / Labels Controls */}
+          {/* Refresh / Pause / Overlay / Labels / Map Style Controls */}
           <div className="flex items-center gap-1 rounded-xl border border-slate-200/90 bg-white/95 p-1 shadow-lg backdrop-blur-md dark:border-white/15 dark:bg-[#0A163D]/95">
             <button
               type="button"
@@ -205,7 +211,7 @@ export function RadarView({
               ) : (
                 <EyeOff className="h-3.5 w-3.5" />
               )}
-              <span className="hidden lg:inline">Abdeckung</span>
+              <span className="hidden lg:inline">Zonen</span>
             </button>
             <button
               type="button"
@@ -233,6 +239,38 @@ export function RadarView({
               <Star className="h-3.5 w-3.5" fill={favoritesOnly ? 'currentColor' : 'none'} />
               <span className="hidden xl:inline">Favoriten</span>
             </button>
+          </div>
+
+          {/* Map Style Switcher */}
+          <div className="hidden items-center gap-0.5 rounded-xl border border-slate-200/90 bg-white/95 p-1 shadow-lg backdrop-blur-md sm:flex dark:border-white/15 dark:bg-[#0A163D]/95">
+            {(
+              [
+                { id: 'street', label: 'Karte' },
+                { id: 'osm', label: 'OSM' },
+                { id: 'satellite', label: 'Satellit' },
+                { id: 'dark', label: 'Dunkel' },
+              ] as const
+            ).map((styleOpt) => {
+              const active =
+                settings.mapStyle === styleOpt.id ||
+                (settings.mapStyle === 'auto' &&
+                  ((settings.theme === 'dark' && styleOpt.id === 'dark') ||
+                    (settings.theme === 'light' && styleOpt.id === 'street')))
+              return (
+                <button
+                  key={styleOpt.id}
+                  type="button"
+                  onClick={() => onUpdateSettings({ mapStyle: styleOpt.id })}
+                  className={`rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                    active
+                      ? 'bg-[#05164D] text-white dark:bg-[#FFAD00] dark:text-[#05164D]'
+                      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10'
+                  }`}
+                >
+                  {styleOpt.label}
+                </button>
+              )
+            })}
           </div>
 
           {/* Mobile Floating Filter Button */}
@@ -309,10 +347,22 @@ export function RadarView({
           </div>
         )}
 
-        {/* Error / Rate-Limit / CORS Banner */}
-        {errorMessage && (
-          <div className="pointer-events-auto flex max-w-xl items-start gap-2.5 rounded-xl border border-rose-300 bg-rose-50/95 px-3.5 py-2.5 text-xs text-rose-900 shadow-lg backdrop-blur-md dark:border-rose-500/40 dark:bg-rose-950/95 dark:text-rose-100">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+        {/* Error / Rate-Limit / Feed Notice Banner */}
+        {showBanner && errorMessage && (
+          <div
+            className={`pointer-events-auto flex max-w-xl items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs shadow-lg backdrop-blur-md ${
+              isSoftWarning
+                ? 'border-amber-300/90 bg-amber-50/95 text-amber-950 dark:border-amber-400/35 dark:bg-amber-950/92 dark:text-amber-100'
+                : 'border-rose-300 bg-rose-50/95 text-rose-900 dark:border-rose-500/40 dark:bg-rose-950/95 dark:text-rose-100'
+            }`}
+          >
+            <AlertTriangle
+              className={`mt-0.5 h-4 w-4 shrink-0 ${
+                isSoftWarning
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }`}
+            />
             <div className="flex-1 space-y-1">
               <p className="font-semibold">{errorMessage}</p>
               <div className="flex flex-wrap gap-2 pt-0.5">
@@ -327,13 +377,21 @@ export function RadarView({
                   <button
                     type="button"
                     onClick={() => onUpdateSettings({ provider: 'adsblol-feed' })}
-                    className="rounded-lg border border-rose-300 px-2.5 py-1 text-[11px] font-semibold hover:bg-rose-100 dark:border-rose-400/30 dark:hover:bg-rose-900/50"
+                    className="rounded-lg border border-current/25 px-2.5 py-1 text-[11px] font-semibold hover:bg-black/5 dark:hover:bg-white/10"
                   >
                     Zum kostenlosen adsb.lol Feed wechseln
                   </button>
                 )}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setDismissedBannerMsg(errorMessage)}
+              className="rounded-md p-0.5 opacity-60 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+              aria-label="Hinweis ausblenden"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
       </div>
@@ -487,6 +545,40 @@ export function RadarView({
                         <span className="truncate">{airline.shortName}</span>
                       </span>
                       <span className="font-mono text-[11px]">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="mb-2 text-xs font-semibold text-slate-500">Kartenstil</div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {(
+                  [
+                    { id: 'street', label: 'Karte' },
+                    { id: 'osm', label: 'OSM' },
+                    { id: 'satellite', label: 'Satellit' },
+                    { id: 'dark', label: 'Dunkel' },
+                  ] as const
+                ).map((styleOpt) => {
+                  const active =
+                    settings.mapStyle === styleOpt.id ||
+                    (settings.mapStyle === 'auto' &&
+                      ((settings.theme === 'dark' && styleOpt.id === 'dark') ||
+                        (settings.theme === 'light' && styleOpt.id === 'street')))
+                  return (
+                    <button
+                      key={styleOpt.id}
+                      type="button"
+                      onClick={() => onUpdateSettings({ mapStyle: styleOpt.id })}
+                      className={`rounded-xl border px-2 py-2 text-xs font-semibold transition ${
+                        active
+                          ? 'border-[#05164D] bg-[#05164D] text-white dark:border-[#FFAD00] dark:bg-[#FFAD00] dark:text-[#05164D]'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-white/15 dark:bg-white/5 dark:text-white'
+                      }`}
+                    >
+                      {styleOpt.label}
                     </button>
                   )
                 })}

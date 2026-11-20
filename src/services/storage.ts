@@ -11,8 +11,9 @@ export const DEFAULT_SETTINGS: ApiSettings = {
   refreshIntervalSec: 30,
   pauseWhenHidden: true,
   unitSystem: 'aviation',
-  showCoverageOverlay: true,
+  showCoverageOverlay: false,
   showLabels: false,
+  mapStyle: 'auto',
   theme: 'light',
 }
 

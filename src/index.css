@@ -47,11 +47,17 @@
 /* Leaflet custom theme harmonization */
 .leaflet-container {
   font-family: var(--font-sans);
-  background: #e8eef5;
+  background: #d8e4f0;
+  width: 100%;
+  height: 100%;
 }
 
 .dark .leaflet-container {
   background: #060f2b;
+}
+
+.leaflet-tile {
+  mix-blend-mode: normal !important;
 }
 
 .leaflet-control-attribution {

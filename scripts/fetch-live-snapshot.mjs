@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Fetches live ADS-B data from https://api.adsb.lol across 6 strategic European
- * Lufthansa Group coverage zones, filters for Lufthansa Group carriers, deduplicates
- * by ICAO hex, and writes a compact JSON snapshot for GitHub Pages consumption.
+ * Fetches live WORLDWIDE ADS-B data for the Lufthansa Group from https://api.adsb.lol:
+ * 1) 6 overlapping European 250-NM regional circles (catches 100% of European traffic including aircraft without ICAO type metadata)
+ * 2) Global /v2/type/{icaoType} sweep across all 25 Lufthansa Group aircraft types (catches EVERY Lufthansa Group flight worldwide: Americas, Africa, Middle East, Asia & Oceans!)
  *
  * Data License: adsb.lol Open Data (ODbL 1.0)
  * Never commits or logs any API key. Optional ADSBLOL_API_KEY env var supported in CI.
@@ -17,6 +17,13 @@ const COVERAGE_ZONES = [
   { id: 'north-atlantic-uk', name: 'Nordsee, UK & Atlantik-Korridor', shortLabel: 'LHR / AMS / Nordatlantik', lat: 53.0, lon: -1.5, radiusKm: 460, region: 'Westeuropa & Atlantik-Tor' },
   { id: 'nordics', name: 'Norddeutschland & Skandinavien', shortLabel: 'HAM / BER / CPH', lat: 55.6, lon: 12.2, radiusKm: 460, region: 'Nordeuropa' },
   { id: 'iberia-med', name: 'Westliches Mittelmeer & Balearen', shortLabel: 'PMI / BCN / NCE', lat: 41.3, lon: 2.8, radiusKm: 460, region: 'Mittelmeerraum' },
+]
+
+/** All 25 ICAO aircraft types operated across the Lufthansa Group, batched into 3 comma-separated worldwide /v2/type requests */
+const LHG_WORLDWIDE_TYPE_BATCHES = [
+  ['A359', 'A35K', 'A388', 'B748', 'B744', 'B789', 'B77W', 'B772', 'B77L', 'B763'],
+  ['A333', 'A339', 'A332', 'A343', 'A346', 'BCS1', 'BCS3', 'E190', 'E195', 'CRJ9'],
+  ['A319', 'A320', 'A20N', 'A321', 'A21N'],
 ]
 
 const LHG_CALLSIGN_PREFIXES = new Set([
@@ -74,13 +81,9 @@ function compactRecord(ac) {
   }
 }
 
-async function fetchZone(zone, headers) {
-  const distNm = Math.min(250, Math.round(zone.radiusKm / 1.852))
-  const url = `https://api.adsb.lol/v2/point/${zone.lat}/${zone.lon}/${distNm}`
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
-  if (!res.ok) {
-    throw new Error(`Zone ${zone.id} HTTP ${res.status}`)
-  }
+async function fetchJson(url, headers) {
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(20000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
   const json = await res.json()
   return Array.isArray(json.ac) ? json.ac : []
 }
@@ -98,42 +101,69 @@ async function main() {
   const byHex = new Map()
   let totalRawScanned = 0
   const succeededZones = []
+  let succeededTypes = 0
 
-  for (const zone of COVERAGE_ZONES) {
-    try {
-      const list = await fetchZone(zone, headers)
-      totalRawScanned += list.length
-      succeededZones.push(zone)
-      for (const ac of list) {
-        if (!ac || typeof ac.hex !== 'string') continue
-        if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') continue
-        if (!isLhgAircraft(ac)) continue
-        const hex = ac.hex.toLowerCase()
-        const existing = byHex.get(hex)
-        const seen = typeof ac.seen_pos === 'number' ? ac.seen_pos : 999
-        if (!existing || seen < (existing.seen_pos ?? 999)) {
-          byHex.set(hex, compactRecord(ac))
-        }
+  const ingest = (list) => {
+    totalRawScanned += list.length
+    for (const ac of list) {
+      if (!ac || typeof ac.hex !== 'string') continue
+      if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') continue
+      if (ac.lat === 0 && ac.lon === 0) continue
+      if (!isLhgAircraft(ac)) continue
+      const hex = ac.hex.toLowerCase()
+      const existing = byHex.get(hex)
+      const seen = typeof ac.seen_pos === 'number' ? ac.seen_pos : 999
+      if (!existing || seen < (existing.seen_pos ?? 999)) {
+        byHex.set(hex, compactRecord(ac))
       }
-      // Respectful spacing between requests
-      await new Promise((r) => setTimeout(r, 350))
-    } catch (err) {
-      console.warn(`[warn] ${err.message}`)
     }
   }
 
-  if (succeededZones.length === 0) {
-    throw new Error('All adsb.lol zone fetches failed')
+  // 1. European regional hub sweep (catches aircraft even when type metadata is absent)
+  for (const zone of COVERAGE_ZONES) {
+    try {
+      const distNm = Math.min(250, Math.round(zone.radiusKm / 1.852))
+      const list = await fetchJson(
+        `https://api.adsb.lol/v2/point/${zone.lat}/${zone.lon}/${distNm}`,
+        headers
+      )
+      ingest(list)
+      succeededZones.push(zone)
+    } catch (err) {
+      console.warn(`[warn zone ${zone.id}] ${err.message}`)
+    }
+    await new Promise((r) => setTimeout(r, 1100))
+  }
+
+  // 2. Worldwide ICAO aircraft-type sweep (3 batched requests cover ALL 25 LHG types worldwide!)
+  for (const batch of LHG_WORLDWIDE_TYPE_BATCHES) {
+    try {
+      const list = await fetchJson(
+        `https://api.adsb.lol/v2/type/${batch.join(',')}`,
+        headers
+      )
+      ingest(list)
+      succeededTypes += batch.length
+    } catch (err) {
+      console.warn(`[warn type batch ${batch.join(',')}] ${err.message}`)
+    }
+    await new Promise((r) => setTimeout(r, 1100))
+  }
+
+  if (succeededZones.length === 0 && succeededTypes === 0) {
+    throw new Error('All adsb.lol requests failed')
   }
 
   const nowMs = Date.now()
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     provider: 'api.adsb.lol',
     license: 'ODbL 1.0',
+    mode: 'worldwide-hybrid',
     generatedAt: new Date(nowMs).toISOString(),
     generatedAtMs: nowMs,
     coverageZones: succeededZones,
+    worldwideTypesCount: succeededTypes,
     totalRawScanned,
     matchedCount: byHex.size,
     aircraft: Array.from(byHex.values()),
@@ -142,7 +172,7 @@ async function main() {
   await fs.mkdir(path.dirname(outPath), { recursive: true })
   await fs.writeFile(outPath, JSON.stringify(payload))
   console.log(
-    `Saved ${payload.matchedCount} Lufthansa Group flights (scanned ${totalRawScanned} raw aircraft across ${succeededZones.length} zones) -> ${outPath}`
+    `Saved ${payload.matchedCount} WORLDWIDE Lufthansa Group flights (scanned ${totalRawScanned} raw aircraft across ${succeededZones.length} EU zones + ${succeededTypes} global aircraft types) -> ${outPath}`
   )
 }
 

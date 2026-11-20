@@ -181,6 +181,8 @@ export interface FeedSnapshotMeta {
   warning?: string
 }
 
+export type MapStyle = 'auto' | 'street' | 'osm' | 'satellite' | 'dark'
+
 export interface ApiSettings {
   provider: ProviderId
   flyItalyApiKey: string
@@ -191,6 +193,7 @@ export interface ApiSettings {
   unitSystem: UnitSystem
   showCoverageOverlay: boolean
   showLabels: boolean
+  mapStyle: MapStyle
   theme: 'light' | 'dark'
 }
 
