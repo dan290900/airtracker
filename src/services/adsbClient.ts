@@ -725,7 +725,10 @@ async function fetchRelayLive(
   kind: 'adsblol-direct' | 'adsbfi-relay'
 ): Promise<FetchFlightsResult> {
   const nowMs = Date.now()
-  const relayBase = options.settings.customRelayUrl.trim().replace(/\/+$/, '')
+  const relayBase = options.settings.customRelayUrl
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/(lhg-live|health|v2(\/.*)?)$/i, '')
 
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (kind === 'adsblol-direct' && options.settings.adsbLolApiKey.trim()) {
